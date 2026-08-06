@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>iptv-restreamer</Name>
+  <Repository>iptv-restreamer:latest</Repository>
+  <Registry/>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support/>
+  <Project/>
+  <Overview>Self-hosted IPTV browser and shared FFmpeg HLS restreamer.</Overview>
+  <Category>MediaApp:Video</Category>
+  <WebUI>http://[IP]:[PORT:3000]/</WebUI>
+  <TemplateURL/>
+  <Icon/>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <Requires/>
+  <Config Name="WebUI Port" Target="3000" Default="3000" Mode="tcp" Description="Web interface port." Type="Port" Display="always" Required="true" Mask="false">3000</Config>
+  <Config Name="Config" Target="/config" Default="/mnt/user/appdata/iptv-restreamer" Mode="rw" Description="Persistent settings directory." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/iptv-restreamer</Config>
+  <Config Name="Storage" Target="/storage" Default="/mnt/user/appdata/iptv-restreamer/storage" Mode="rw" Description="Temporary HLS stream output." Type="Path" Display="advanced" Required="true" Mask="false">/mnt/user/appdata/iptv-restreamer/storage</Config>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="Container user id. Unraid default is 99." Type="Variable" Display="advanced" Required="true" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Container group id. Unraid default is 100." Type="Variable" Display="advanced" Required="true" Mask="false">100</Config>
+  <Config Name="TZ" Target="TZ" Default="America/Regina" Mode="" Description="Container timezone." Type="Variable" Display="advanced" Required="false" Mask="false">America/Regina</Config>
+</Container>

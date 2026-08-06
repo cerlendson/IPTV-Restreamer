@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>IPTV Restreamer</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>IPTV Restreamer</h1>
+        <p id="statusLine">Loading catalog...</p>
+      </div>
+      <nav class="tabs" aria-label="Main views">
+        <button class="tab active" data-view="watch">Watch</button>
+        <button class="tab" data-view="admin">Admin</button>
+      </nav>
+    </header>
+
+    <main>
+      <section id="watchView" class="view active">
+        <aside class="sidebar" aria-label="Channel groups">
+          <div class="sidebar-head">
+            <h2>Groups</h2>
+            <button id="refreshButton" class="icon-button" title="Refresh playlist">Refresh</button>
+          </div>
+          <input id="groupSearchInput" class="group-search" type="search" placeholder="Search groups" />
+          <div id="groups" class="group-list"></div>
+        </aside>
+
+        <section class="content">
+          <section class="player-panel">
+            <video id="video" controls playsinline></video>
+            <div class="player-meta">
+              <div>
+                <h2 id="nowPlaying">Select a channel</h2>
+                <p id="programLine">Current and next program details will appear here.</p>
+                <p id="streamDetails" class="stream-details">Output stream details will appear during playback.</p>
+              </div>
+              <div class="player-actions">
+                <div id="viewerBadge" class="badge">No stream</div>
+                <button id="stopButton" type="button" class="secondary stop-button" disabled>Stop</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="channel-section">
+            <div class="section-title">
+              <h2 id="channelTitle">Channels</h2>
+              <input id="searchInput" type="search" placeholder="Search channels" />
+            </div>
+            <div id="channels" class="channel-grid"></div>
+          </section>
+        </section>
+      </section>
+
+      <section id="adminView" class="view admin-view">
+        <form id="settingsForm" class="settings-form">
+          <section>
+            <h2>Sources</h2>
+            <label>
+              <span>M3U playlist URL or local path</span>
+              <input name="m3uSource" type="text" required />
+            </label>
+            <label>
+              <span>XMLTV EPG URL or local path</span>
+              <input name="xmltvSource" type="text" required />
+            </label>
+          </section>
+
+          <section>
+            <h2>Limits</h2>
+            <div class="form-grid">
+              <label>
+                <span>Maximum upstream connections</span>
+                <input name="maxUpstreamConnections" type="number" min="1" max="100" required />
+              </label>
+              <label>
+                <span>Stream idle timeout seconds</span>
+                <input name="streamIdleTimeoutSeconds" type="number" min="5" required />
+              </label>
+            </div>
+          </section>
+
+          <section>
+            <h2>Transcoding</h2>
+            <div class="form-grid">
+              <label>
+                <span>FFmpeg executable path</span>
+                <input name="ffmpegPath" type="text" placeholder="ffmpeg" />
+              </label>
+              <label>
+                <span>Default transcoding profile</span>
+                <select name="defaultTranscodingProfile">
+                  <option value="fast">Fast</option>
+                  <option value="balanced">Balanced</option>
+                  <option value="quality">Quality</option>
+                </select>
+              </label>
+              <label>
+                <span>Output resolution</span>
+                <select name="outputResolution">
+                  <option value="480p">480p</option>
+                  <option value="720p">720p</option>
+                  <option value="1080p">1080p</option>
+                </select>
+              </label>
+              <label>
+                <span>Video codec</span>
+                <select name="videoCodec">
+                  <option value="h264">H.264</option>
+                  <option value="h265">H.265</option>
+                </select>
+              </label>
+              <label>
+                <span>Video bitrate</span>
+                <input name="videoBitrate" type="text" required />
+              </label>
+              <label class="toggle">
+                <input name="enableHardwareAcceleration" type="checkbox" />
+                <span>Enable hardware acceleration</span>
+              </label>
+              <label>
+                <span>HLS segment duration seconds</span>
+                <input name="hlsSegmentDurationSeconds" type="number" min="1" max="30" required />
+              </label>
+              <label>
+                <span>Output buffer size</span>
+                <input name="outputBufferSize" type="text" required />
+              </label>
+            </div>
+          </section>
+
+          <div class="form-actions">
+            <button type="submit">Save Settings</button>
+            <button id="adminRefreshButton" type="button" class="secondary">Refresh IPTV Data</button>
+          </div>
+          <p id="settingsMessage" class="message"></p>
+        </form>
+
+        <section class="active-card">
+          <h2>Active Streams</h2>
+          <div id="activeStreams"></div>
+        </section>
+      </section>
+    </main>
+
+    <div id="toast" role="status" aria-live="polite"></div>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

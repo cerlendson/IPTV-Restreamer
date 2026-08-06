@@ -1,0 +1,19 @@
+services:
+  iptv-restreamer:
+    build: .
+    image: iptv-restreamer:latest
+    container_name: iptv-restreamer
+    environment:
+      PUID: ${PUID:-99}
+      PGID: ${PGID:-100}
+      TZ: ${TZ:-America/Regina}
+      PORT: 3000
+      DATA_DIR: /config
+      STORAGE_DIR: /storage
+      HLS_DIR: /storage/hls
+    ports:
+      - "${WEBUI_PORT:-3000}:3000"
+    volumes:
+      - "${APPDATA_PATH:-/mnt/user/appdata/iptv-restreamer}:/config"
+      - "${STORAGE_PATH:-/mnt/user/appdata/iptv-restreamer/storage}:/storage"
+    restart: unless-stopped
