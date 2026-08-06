@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>iptv-restreamer</Name>
-  <Repository>iptv-restreamer:latest</Repository>
-  <Registry/>
+  <Repository>ghcr.io/cerlendson/iptv-restreamer:latest</Repository>
+  <Registry>https://github.com/cerlendson/IPTV-Restreamer/pkgs/container/iptv-restreamer</Registry>
   <Network>bridge</Network>
   <MyIP/>
   <Shell>sh</Shell>

@@ -1,7 +1,6 @@
 services:
   iptv-restreamer:
-    build: .
-    image: iptv-restreamer:latest
+    image: ghcr.io/cerlendson/iptv-restreamer:latest
     container_name: iptv-restreamer
     environment:
       PUID: ${PUID:-99}

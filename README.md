@@ -17,8 +17,10 @@ FFmpeg must be installed and available on `PATH`, or set its executable path on 
 
 ## Docker And Unraid
 
-This project includes a Dockerfile, Compose file, and starter Unraid template.
-For Unraid, build the image as `iptv-restreamer:latest`, map
+This project publishes a Docker image to GitHub Container Registry:
+`ghcr.io/cerlendson/iptv-restreamer:latest`.
+
+For Unraid, set the repository to that image, map
 `/mnt/user/appdata/iptv-restreamer` to `/config`, map
 `/mnt/user/appdata/iptv-restreamer/storage` to `/storage`, and publish host port
 `3000` to container port `3000`.
