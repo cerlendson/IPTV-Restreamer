@@ -6,6 +6,7 @@ const state = {
   viewerId: null,
   hls: null,
   heartbeatTimer: null,
+  statusTimer: null,
   playbackProfile: null,
   measuredBitrateKbps: null,
   search: "",
@@ -27,6 +28,10 @@ const VIDEO_BITRATE_SUGGESTIONS = {
 };
 
 const els = {
+  authGate: document.querySelector("#authGate"),
+  authForm: document.querySelector("#authForm"),
+  authPassword: document.querySelector("#authPassword"),
+  authMessage: document.querySelector("#authMessage"),
   statusLine: document.querySelector("#statusLine"),
   groups: document.querySelector("#groups"),
   channels: document.querySelector("#channels"),
@@ -47,6 +52,7 @@ const els = {
   toast: document.querySelector("#toast")
 };
 
+els.authForm.addEventListener("submit", login);
 document.querySelectorAll(".tab").forEach((tab) => {
   tab.addEventListener("click", () => switchView(tab.dataset.view));
 });
@@ -69,12 +75,58 @@ els.settingsForm.elements.outputResolution.addEventListener("change", applySugge
 els.settingsForm.elements.videoCodec.addEventListener("change", applySuggestedVideoBitrate);
 window.addEventListener("beforeunload", releaseViewer);
 
-await boot();
+if (await checkAuth()) {
+  await boot();
+}
+
+async function checkAuth() {
+  const status = await fetchJson("/api/auth/status");
+  if (status.passwordRequired && !status.authenticated) {
+    lockForPassword("");
+    return false;
+  }
+
+  unlockApp();
+  return true;
+}
+
+async function login(event) {
+  event.preventDefault();
+  els.authMessage.textContent = "";
+
+  try {
+    await fetchJson("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ password: els.authPassword.value })
+    });
+    els.authPassword.value = "";
+    unlockApp();
+    await boot();
+  } catch (error) {
+    els.authMessage.textContent = error.message;
+    els.authPassword.select();
+  }
+}
+
+function lockForPassword(message) {
+  document.body.classList.remove("auth-checking");
+  document.body.classList.add("auth-locked");
+  els.authGate.hidden = false;
+  els.authMessage.textContent = message;
+  els.authPassword.focus();
+}
+
+function unlockApp() {
+  document.body.classList.remove("auth-checking", "auth-locked");
+  els.authGate.hidden = true;
+  els.authMessage.textContent = "";
+}
 
 async function boot() {
   await Promise.all([loadSettings(), loadStatus()]);
   await loadGroups();
-  setInterval(loadStatus, 10000);
+  if (state.statusTimer) clearInterval(state.statusTimer);
+  state.statusTimer = setInterval(() => loadStatus().catch(() => {}), 10000);
 }
 
 async function loadSettings() {
@@ -103,7 +155,8 @@ async function saveSettings(event) {
     enableHardwareAcceleration: form.has("enableHardwareAcceleration"),
     streamIdleTimeoutSeconds: Number(form.get("streamIdleTimeoutSeconds")),
     hlsSegmentDurationSeconds: Number(form.get("hlsSegmentDurationSeconds")),
-    outputBufferSize: form.get("outputBufferSize")
+    outputBufferSize: form.get("outputBufferSize"),
+    websitePassword: form.get("websitePassword")
   };
 
   const result = await api("/api/settings", {
@@ -111,6 +164,7 @@ async function saveSettings(event) {
     body: JSON.stringify(payload)
   });
   state.settings = result.settings || result;
+  els.settingsForm.elements.websitePassword.value = "";
 
   if (result.streamsRestarted) {
     clearViewerSession();
@@ -504,6 +558,31 @@ function switchView(view) {
 }
 
 async function api(url, options = {}) {
+  const response = await fetch(url, {
+    headers: { "Content-Type": "application/json" },
+    ...options
+  });
+
+  let body = null;
+  try {
+    body = await response.json();
+  } catch {
+    body = {};
+  }
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      clearViewerSession();
+      resetPlayer();
+      lockForPassword(body.error || "Enter the website password to continue.");
+    }
+    throw new Error(body.error || response.statusText);
+  }
+
+  return body;
+}
+
+async function fetchJson(url, options = {}) {
   const response = await fetch(url, {
     headers: { "Content-Type": "application/json" },
     ...options

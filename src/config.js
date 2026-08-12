@@ -1,4 +1,5 @@
 const fs = require("fs/promises");
+const crypto = require("crypto");
 const path = require("path");
 
 const rootDir = path.resolve(__dirname, "..");
@@ -19,7 +20,8 @@ const defaultSettings = {
   enableHardwareAcceleration: false,
   streamIdleTimeoutSeconds: 30,
   hlsSegmentDurationSeconds: 4,
-  outputBufferSize: "3000k"
+  outputBufferSize: "3000k",
+  websitePasswordHash: process.env.WEBSITE_PASSWORD ? hashPassword(process.env.WEBSITE_PASSWORD) : ""
 };
 
 async function ensureRuntimeDirs() {
@@ -29,12 +31,17 @@ async function ensureRuntimeDirs() {
 
 function normalizeSettings(input = {}) {
   const merged = { ...defaultSettings, ...input };
+  const hasWebsitePassword = Object.prototype.hasOwnProperty.call(input, "websitePassword");
   const outputResolution = normalizeChoice(
     merged.outputResolution,
     ["480p", "720p", "1080p"],
     "720p"
   );
   const videoCodec = normalizeChoice(merged.videoCodec, ["h264", "h265"], "h264");
+  const websitePassword = hasWebsitePassword ? String(input.websitePassword || "") : "";
+  const websitePasswordHash = websitePassword
+    ? hashPassword(websitePassword)
+    : normalizePasswordHash(merged.websitePasswordHash);
 
   return {
     m3uSource: String(merged.m3uSource || defaultSettings.m3uSource).trim(),
@@ -51,7 +58,8 @@ function normalizeSettings(input = {}) {
     enableHardwareAcceleration: Boolean(merged.enableHardwareAcceleration),
     streamIdleTimeoutSeconds: clampInteger(merged.streamIdleTimeoutSeconds, 5, 3600, 30),
     hlsSegmentDurationSeconds: clampInteger(merged.hlsSegmentDurationSeconds, 1, 30, 4),
-    outputBufferSize: String(merged.outputBufferSize || "3000k").trim()
+    outputBufferSize: String(merged.outputBufferSize || "3000k").trim(),
+    websitePasswordHash
   };
 }
 
@@ -112,6 +120,26 @@ function normalizeFfmpegPath(value) {
   return ffmpegPath;
 }
 
+function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
+  const hash = crypto.scryptSync(String(password), salt, 64).toString("hex");
+  return `scrypt:${salt}:${hash}`;
+}
+
+function verifyPassword(password, passwordHash) {
+  const normalizedHash = normalizePasswordHash(passwordHash);
+  const [, salt, expectedHash] = normalizedHash.split(":");
+  if (!salt || !expectedHash) return false;
+
+  const actual = crypto.scryptSync(String(password || ""), salt, 64);
+  const expected = Buffer.from(expectedHash, "hex");
+  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+}
+
+function normalizePasswordHash(value) {
+  const passwordHash = String(value || "").trim();
+  return /^scrypt:[a-f0-9]{32}:[a-f0-9]{128}$/i.test(passwordHash) ? passwordHash : "";
+}
+
 function suggestedVideoBitrate(outputResolution = "720p", videoCodec = "h264") {
   const suggestions = {
     h264: {
@@ -141,5 +169,6 @@ module.exports = {
   loadSettings,
   saveSettings,
   normalizeSettings,
+  verifyPassword,
   suggestedVideoBitrate
 };

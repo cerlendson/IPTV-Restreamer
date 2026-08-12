@@ -6,7 +6,19 @@
     <title>IPTV Restreamer</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
-  <body>
+  <body class="auth-checking">
+    <section id="authGate" class="auth-gate" hidden>
+      <form id="authForm" class="auth-card">
+        <h1>IPTV Restreamer</h1>
+        <label>
+          <span>Website password</span>
+          <input id="authPassword" type="password" autocomplete="current-password" required autofocus />
+        </label>
+        <button type="submit">Unlock</button>
+        <p id="authMessage" class="message"></p>
+      </form>
+    </section>
+
     <header class="topbar">
       <div>
         <h1>IPTV Restreamer</h1>
@@ -81,6 +93,19 @@
                 <input name="streamIdleTimeoutSeconds" type="number" min="5" required />
               </label>
             </div>
+          </section>
+
+          <section>
+            <h2>Access</h2>
+            <label>
+              <span>Website password</span>
+              <input
+                name="websitePassword"
+                type="password"
+                autocomplete="new-password"
+                placeholder="Leave blank to keep current password"
+              />
+            </label>
           </section>
 
           <section>
