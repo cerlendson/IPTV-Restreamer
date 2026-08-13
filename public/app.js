@@ -45,6 +45,8 @@ const els = {
   filterChannelSearchInput: document.querySelector("#filterChannelSearchInput"),
   filterGroups: document.querySelector("#filterGroups"),
   filterChannels: document.querySelector("#filterChannels"),
+  selectAllGroupFiltersButton: document.querySelector("#selectAllGroupFiltersButton"),
+  selectAllChannelFiltersButton: document.querySelector("#selectAllChannelFiltersButton"),
   clearGroupFiltersButton: document.querySelector("#clearGroupFiltersButton"),
   clearChannelFiltersButton: document.querySelector("#clearChannelFiltersButton"),
   feedPasswordInput: document.querySelector("#feedPasswordInput"),
@@ -90,14 +92,24 @@ els.filterChannelSearchInput.addEventListener("input", () => {
   state.filterChannelSearch = els.filterChannelSearchInput.value.trim().toLowerCase();
   renderFilterChannels();
 });
+els.selectAllGroupFiltersButton.addEventListener("click", () => {
+  state.settings.excludedGroups = state.filterOptions.groups.slice();
+  markFiltersChanged();
+  renderFilterGroups();
+});
+els.selectAllChannelFiltersButton.addEventListener("click", () => {
+  state.settings.excludedChannels = state.filterOptions.channels.map((channel) => channel.id);
+  markFiltersChanged();
+  renderFilterChannels();
+});
 els.clearGroupFiltersButton.addEventListener("click", () => {
   state.settings.excludedGroups = [];
-  els.settingsMessage.textContent = "Save settings to apply content filters.";
+  markFiltersChanged();
   renderFilterGroups();
 });
 els.clearChannelFiltersButton.addEventListener("click", () => {
   state.settings.excludedChannels = [];
-  els.settingsMessage.textContent = "Save settings to apply content filters.";
+  markFiltersChanged();
   renderFilterChannels();
 });
 els.feedPasswordInput.addEventListener("input", renderFeedLinks);
@@ -464,6 +476,10 @@ function updateExcludedList(key, value, excluded) {
   if (excluded) entries.add(value);
   else entries.delete(value);
   state.settings[key] = Array.from(entries);
+  markFiltersChanged();
+}
+
+function markFiltersChanged() {
   els.settingsMessage.textContent = "Save settings to apply content filters.";
 }
 

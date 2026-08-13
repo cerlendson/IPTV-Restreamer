@@ -484,6 +484,13 @@ label {
   gap: 10px;
 }
 
+.filter-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .filter-list {
   display: grid;
   gap: 4px;
