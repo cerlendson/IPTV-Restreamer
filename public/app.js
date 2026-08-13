@@ -14,7 +14,9 @@ const state = {
   collapsedGroupCategories: new Set(),
   filterOptions: { groups: [], channels: [] },
   filterGroupSearch: "",
-  filterChannelSearch: ""
+  filterChannelSearch: "",
+  feedLinkTimer: null,
+  feedLinkRequestId: 0
 };
 
 const VIDEO_BITRATE_SUGGESTIONS = {
@@ -52,6 +54,7 @@ const els = {
   feedPasswordInput: document.querySelector("#feedPasswordInput"),
   m3uLinkInput: document.querySelector("#m3uLinkInput"),
   xmltvLinkInput: document.querySelector("#xmltvLinkInput"),
+  feedLinksMessage: document.querySelector("#feedLinksMessage"),
   refreshButton: document.querySelector("#refreshButton"),
   adminRefreshButton: document.querySelector("#adminRefreshButton"),
   settingsForm: document.querySelector("#settingsForm"),
@@ -112,7 +115,7 @@ els.clearChannelFiltersButton.addEventListener("click", () => {
   markFiltersChanged();
   renderFilterChannels();
 });
-els.feedPasswordInput.addEventListener("input", renderFeedLinks);
+els.feedPasswordInput.addEventListener("input", scheduleFeedLinkRender);
 els.settingsForm.addEventListener("submit", saveSettings);
 els.settingsForm.elements.outputResolution.addEventListener("change", applySuggestedVideoBitrate);
 els.settingsForm.elements.videoCodec.addEventListener("change", applySuggestedVideoBitrate);
@@ -484,16 +487,42 @@ function markFiltersChanged() {
 }
 
 function renderFeedLinks() {
+  scheduleFeedLinkRender();
+}
+
+function scheduleFeedLinkRender() {
+  if (state.feedLinkTimer) clearTimeout(state.feedLinkTimer);
+  state.feedLinkTimer = setTimeout(generateFeedLinks, 250);
+}
+
+async function generateFeedLinks() {
   const password = els.feedPasswordInput.value;
+  const requestId = ++state.feedLinkRequestId;
+
   if (!password) {
     els.m3uLinkInput.value = "";
     els.xmltvLinkInput.value = "";
+    els.feedLinksMessage.textContent = "";
     return;
   }
 
-  const encodedPassword = encodeURIComponent(password);
-  els.m3uLinkInput.value = `${window.location.origin}/playlist.m3u?password=${encodedPassword}`;
-  els.xmltvLinkInput.value = `${window.location.origin}/xmltv.xml?password=${encodedPassword}`;
+  els.feedLinksMessage.textContent = "Checking password...";
+
+  try {
+    const links = await fetchJson("/api/feed-links", {
+      method: "POST",
+      body: JSON.stringify({ password })
+    });
+    if (requestId !== state.feedLinkRequestId) return;
+    els.m3uLinkInput.value = links.m3uUrl;
+    els.xmltvLinkInput.value = links.xmltvUrl;
+    els.feedLinksMessage.textContent = "Links ready.";
+  } catch (error) {
+    if (requestId !== state.feedLinkRequestId) return;
+    els.m3uLinkInput.value = "";
+    els.xmltvLinkInput.value = "";
+    els.feedLinksMessage.textContent = error.message;
+  }
 }
 
 async function playChannel(channel) {

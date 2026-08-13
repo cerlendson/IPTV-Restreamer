@@ -138,6 +138,26 @@ app.get("/stream/:channelId/:fileName", async (req, res, next) => {
 
 app.use(requireAuth);
 
+app.post("/api/feed-links", (req, res) => {
+  const password = String(req.body?.password || "");
+  if (!settings?.websitePasswordHash) {
+    res.status(409).json({ error: "Set a website password before generating feed links." });
+    return;
+  }
+
+  if (!password || !verifyPassword(password, settings.websitePasswordHash)) {
+    res.status(401).json({ error: "That password does not match the saved website password." });
+    return;
+  }
+
+  const encodedPassword = encodeURIComponent(password);
+  const baseUrl = requestBaseUrl(req);
+  res.json({
+    m3uUrl: `${baseUrl}/playlist.m3u?password=${encodedPassword}`,
+    xmltvUrl: `${baseUrl}/xmltv.xml?password=${encodedPassword}`
+  });
+});
+
 app.use(
   "/hls",
   express.static(hlsRoot, {
