@@ -1,5 +1,6 @@
 const express = require("express");
 const crypto = require("crypto");
+const fs = require("fs/promises");
 const path = require("path");
 const {
   rootDir,
@@ -16,10 +17,13 @@ const { StreamManager } = require("./stream-manager");
 const PORT = Number.parseInt(process.env.PORT || "3000", 10);
 const AUTH_COOKIE = "iptv_auth";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
+const CATALOG_REFRESH_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+const AUTO_REFRESH_CHECK_INTERVAL_MS = 5 * 60 * 1000;
 
 let settings = null;
 let catalog = createEmptyCatalog();
 let importState = { status: "idle", message: "", updatedAt: null };
+let refreshPromise = null;
 const sessions = new Map();
 
 const app = express();
@@ -63,6 +67,73 @@ app.get("/api/health", (req, res) => {
     importStatus: importState.status,
     activeStreams: streamManager.listActiveStreams().length
   });
+});
+
+app.get("/playlist.m3u", (req, res) => {
+  const password = requireFeedPassword(req, res);
+  if (password == null) return;
+
+  res
+    .type("application/x-mpegurl")
+    .set("Cache-Control", "no-store")
+    .send(buildM3uPlaylist(req, password));
+});
+
+app.get(["/xmltv.xml", "/epg.xml"], (req, res) => {
+  const password = requireFeedPassword(req, res);
+  if (password == null) return;
+
+  res
+    .type("application/xml")
+    .set("Cache-Control", "no-store")
+    .send(buildXmltvGuide());
+});
+
+app.get("/stream/:channelId/index.m3u8", async (req, res, next) => {
+  try {
+    const password = requireFeedPassword(req, res);
+    if (password == null) return;
+
+    const channelId = req.params.channelId;
+    if (isChannelExcluded(channelId)) {
+      res.status(404).send("Channel not found.");
+      return;
+    }
+
+    const stream = await streamManager.startExternal(channelId);
+    const playlist = await fs.readFile(stream.playlistPath, "utf8");
+    res
+      .type("application/vnd.apple.mpegurl")
+      .set("Cache-Control", "no-store")
+      .send(rewriteHlsPlaylist(req, channelId, password, playlist));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/stream/:channelId/:fileName", async (req, res, next) => {
+  try {
+    const password = requireFeedPassword(req, res);
+    if (password == null) return;
+
+    const channelId = req.params.channelId;
+    const fileName = req.params.fileName;
+    if (isChannelExcluded(channelId) || !isSafeHlsFileName(fileName)) {
+      res.status(404).send("File not found.");
+      return;
+    }
+
+    const stream = await streamManager.startExternal(channelId);
+    const filePath = path.join(stream.outputDir, fileName);
+    await fs.access(filePath);
+    res.set("Cache-Control", "no-store").sendFile(filePath);
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      res.status(404).send("File not found.");
+      return;
+    }
+    next(error);
+  }
 });
 
 app.use(requireAuth);
@@ -120,21 +191,38 @@ app.post("/api/refresh", async (req, res, next) => {
 });
 
 app.get("/api/status", (req, res) => {
+  const channels = visibleChannels();
+  const groups = visibleGroups(channels);
   res.json({
     importState,
-    stats: catalog.stats,
+    stats: {
+      ...catalog.stats,
+      channelCount: channels.length,
+      groupCount: groups.length
+    },
     activeStreams: streamManager.listActiveStreams(),
     maxUpstreamConnections: settings.maxUpstreamConnections
   });
 });
 
+app.get("/api/filter-options", (req, res) => {
+  res.json({
+    groups: catalog.groups,
+    channels: catalog.channels.map((channel) => ({
+      id: channel.id,
+      name: channel.name,
+      group: channel.group
+    }))
+  });
+});
+
 app.get("/api/groups", (req, res) => {
-  res.json(catalog.groups);
+  res.json(visibleGroups());
 });
 
 app.get("/api/channels", (req, res) => {
   const group = String(req.query.group || "");
-  const channels = catalog.channels
+  const channels = visibleChannels()
     .filter((channel) => !group || channel.group === group)
     .map((channel) => ({
       ...channel,
@@ -146,7 +234,7 @@ app.get("/api/channels", (req, res) => {
 });
 
 app.get("/api/channels/:channelId", (req, res) => {
-  const channel = catalog.channels.find((entry) => entry.id === req.params.channelId);
+  const channel = visibleChannels().find((entry) => entry.id === req.params.channelId);
   if (!channel) return res.status(404).json({ error: "Channel not found." });
   res.json({
     ...channel,
@@ -157,6 +245,11 @@ app.get("/api/channels/:channelId", (req, res) => {
 
 app.post("/api/streams/:channelId/start", async (req, res, next) => {
   try {
+    if (isChannelExcluded(req.params.channelId)) {
+      res.status(404).json({ error: "Channel not found." });
+      return;
+    }
+
     const stream = await streamManager.start(req.params.channelId);
     res.json(stream);
   } catch (error) {
@@ -180,6 +273,16 @@ app.use((error, req, res, next) => {
 });
 
 async function refreshCatalog() {
+  if (refreshPromise) return refreshPromise;
+
+  refreshPromise = runCatalogRefresh().finally(() => {
+    refreshPromise = null;
+  });
+
+  return refreshPromise;
+}
+
+async function runCatalogRefresh() {
   importState = {
     status: "running",
     message: "Importing playlist and EPG...",
@@ -206,6 +309,171 @@ async function refreshCatalog() {
   }
 }
 
+function startAutoRefreshTimer() {
+  const timer = setInterval(() => {
+    refreshCatalogIfStale().catch((error) => {
+      console.error(`Automatic IPTV refresh failed: ${error.message}`);
+    });
+  }, AUTO_REFRESH_CHECK_INTERVAL_MS);
+
+  timer.unref?.();
+  return timer;
+}
+
+async function refreshCatalogIfStale() {
+  if (!isCatalogStale()) return false;
+  await refreshCatalog();
+  return true;
+}
+
+function isCatalogStale() {
+  if (refreshPromise) return false;
+  if (!catalog.importedAt) return true;
+
+  const importedAt = new Date(catalog.importedAt).getTime();
+  if (!Number.isFinite(importedAt)) return true;
+
+  return Date.now() - importedAt >= CATALOG_REFRESH_MAX_AGE_MS;
+}
+
+function buildM3uPlaylist(req, password) {
+  const encodedPassword = encodeURIComponent(password);
+  const baseUrl = requestBaseUrl(req);
+  const lines = [`#EXTM3U x-tvg-url="${baseUrl}/xmltv.xml?password=${encodedPassword}"`];
+
+  for (const channel of visibleChannels()) {
+    const streamUrl = `${baseUrl}/stream/${encodeURIComponent(channel.id)}/index.m3u8?password=${encodedPassword}`;
+    lines.push(
+      `#EXTINF:-1 tvg-id="${m3uAttr(channel.id)}" tvg-name="${m3uAttr(channel.name)}" tvg-logo="${m3uAttr(channel.logo)}" group-title="${m3uAttr(channel.group)}",${m3uName(channel.name)}`,
+      streamUrl
+    );
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+function buildXmltvGuide() {
+  const lines = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<tv generator-info-name="IPTV Restreamer">'
+  ];
+
+  for (const channel of visibleChannels()) {
+    lines.push(`  <channel id="${xmlAttr(channel.id)}">`);
+    lines.push(`    <display-name>${xmlText(channel.name)}</display-name>`);
+    if (channel.logo) {
+      lines.push(`    <icon src="${xmlAttr(channel.logo)}" />`);
+    }
+    lines.push("  </channel>");
+  }
+
+  for (const channel of visibleChannels()) {
+    for (const programme of catalog.epgByChannelId[channel.id] || []) {
+      const start = formatXmltvDate(programme.start);
+      const stop = formatXmltvDate(programme.stop);
+      if (!start || !stop) continue;
+
+      lines.push(
+        `  <programme start="${start}" stop="${stop}" channel="${xmlAttr(channel.id)}">`,
+        `    <title>${xmlText(programme.title || "Untitled")}</title>`
+      );
+      if (programme.subTitle) {
+        lines.push(`    <sub-title>${xmlText(programme.subTitle)}</sub-title>`);
+      }
+      if (programme.description) {
+        lines.push(`    <desc>${xmlText(programme.description)}</desc>`);
+      }
+      lines.push("  </programme>");
+    }
+  }
+
+  lines.push("</tv>");
+  return `${lines.join("\n")}\n`;
+}
+
+function rewriteHlsPlaylist(req, channelId, password, playlist) {
+  const baseUrl = requestBaseUrl(req);
+  const encodedChannelId = encodeURIComponent(channelId);
+  const encodedPassword = encodeURIComponent(password);
+
+  return playlist
+    .split(/\r?\n/)
+    .map((line) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) return line;
+      if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return line;
+      const fileName = path.basename(trimmed);
+      return `${baseUrl}/stream/${encodedChannelId}/${encodeURIComponent(fileName)}?password=${encodedPassword}`;
+    })
+    .join("\n");
+}
+
+function requireFeedPassword(req, res) {
+  const password = String(req.query.password || "");
+  if (!settings?.websitePasswordHash) {
+    res.status(403).send("Set a website password before using playlist or EPG links.");
+    return null;
+  }
+
+  if (!password || !verifyPassword(password, settings.websitePasswordHash)) {
+    res.status(401).send("A valid password query parameter is required.");
+    return null;
+  }
+
+  return password;
+}
+
+function requestBaseUrl(req) {
+  const proto = String(req.get("x-forwarded-proto") || req.protocol || "http")
+    .split(",")[0]
+    .trim();
+  const host = req.get("x-forwarded-host") || req.get("host");
+  return `${proto}://${host}`;
+}
+
+function isSafeHlsFileName(fileName) {
+  return /^[A-Za-z0-9._-]+$/.test(fileName) && fileName !== "index.m3u8";
+}
+
+function formatXmltvDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "";
+
+  const parts = [
+    date.getUTCFullYear(),
+    date.getUTCMonth() + 1,
+    date.getUTCDate(),
+    date.getUTCHours(),
+    date.getUTCMinutes(),
+    date.getUTCSeconds()
+  ];
+  const [year, ...rest] = parts;
+  return `${year}${rest.map((part) => String(part).padStart(2, "0")).join("")} +0000`;
+}
+
+function m3uAttr(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/\r?\n/g, " ");
+}
+
+function m3uName(value) {
+  return String(value || "").replace(/\r?\n/g, " ").trim();
+}
+
+function xmlAttr(value) {
+  return xmlText(value).replace(/"/g, "&quot;");
+}
+
+function xmlText(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 function transcodingSettingsChanged(previousSettings, nextSettings) {
   if (!previousSettings) return false;
 
@@ -219,6 +487,29 @@ function transcodingSettingsChanged(previousSettings, nextSettings) {
     "hlsSegmentDurationSeconds",
     "outputBufferSize"
   ].some((key) => previousSettings[key] !== nextSettings[key]);
+}
+
+function visibleChannels() {
+  return catalog.channels.filter((channel) => !isChannelExcluded(channel.id));
+}
+
+function visibleGroups(channels = visibleChannels()) {
+  const groupSet = new Set(channels.map((channel) => channel.group).filter(Boolean));
+  return catalog.groups.filter((group) => groupSet.has(group) && !excludedGroupSet().has(group));
+}
+
+function isChannelExcluded(channelId) {
+  const channel = catalog.channels.find((entry) => entry.id === channelId);
+  if (!channel) return false;
+  return excludedGroupSet().has(channel.group) || excludedChannelSet().has(channel.id);
+}
+
+function excludedGroupSet() {
+  return new Set(settings?.excludedGroups || []);
+}
+
+function excludedChannelSet() {
+  return new Set(settings?.excludedChannels || []);
 }
 
 function isPasswordRequired() {
@@ -297,6 +588,7 @@ function publicSettings(settings) {
 async function main() {
   await ensureRuntimeDirs();
   settings = await loadSettings();
+  const autoRefreshTimer = startAutoRefreshTimer();
 
   refreshCatalog().catch((error) => {
     console.error(`Startup import failed: ${error.message}`);
@@ -308,6 +600,7 @@ async function main() {
 
   const shutdown = async () => {
     console.log("Shutting down...");
+    clearInterval(autoRefreshTimer);
     server.close();
     await streamManager.stopAll();
     process.exit(0);

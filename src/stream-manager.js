@@ -38,24 +38,7 @@ class StreamManager {
       throw error;
     }
 
-    let stream = this.streams.get(channelId);
-    if (!stream) {
-      if (this.streams.size >= settings.maxUpstreamConnections) {
-        const error = new Error(
-          "Maximum number of active streams is currently in use. Please try again later."
-        );
-        error.status = 429;
-        throw error;
-      }
-      stream = await this.createStream(channel, settings);
-      this.streams.set(channelId, stream);
-    }
-
-    if (stream.idleTimer) {
-      clearTimeout(stream.idleTimer);
-      stream.idleTimer = null;
-    }
-
+    const stream = await this.getOrCreateStream(channel, settings);
     const viewerId = crypto.randomUUID();
     stream.viewerIds.add(viewerId);
     stream.lastActivity = new Date().toISOString();
@@ -65,6 +48,33 @@ class StreamManager {
       viewerId,
       channelId,
       playlistUrl: `/hls/${encodeURIComponent(channelId)}/index.m3u8`,
+      viewerCount: stream.viewerIds.size,
+      reused: stream.viewerIds.size > 1,
+      activeUpstreamConnections: this.streams.size,
+      playbackProfile: stream.playbackProfile
+    };
+  }
+
+  async startExternal(channelId) {
+    const settings = this.getSettings();
+    const channel = this.getChannel(channelId);
+    if (!channel) {
+      const error = new Error("Channel not found.");
+      error.status = 404;
+      throw error;
+    }
+
+    const stream = await this.getOrCreateStream(channel, settings);
+    const viewerId = `external:${channelId}`;
+    stream.viewerIds.add(viewerId);
+    stream.lastActivity = new Date().toISOString();
+    this.viewerToChannel.set(viewerId, channelId);
+    this.scheduleExternalRelease(stream, viewerId);
+
+    return {
+      channelId,
+      playlistPath: path.join(stream.outputDir, "index.m3u8"),
+      outputDir: stream.outputDir,
       viewerCount: stream.viewerIds.size,
       reused: stream.viewerIds.size > 1,
       activeUpstreamConnections: this.streams.size,
@@ -101,6 +111,28 @@ class StreamManager {
     await Promise.all(Array.from(this.streams.values()).map((stream) => this.stopStream(stream)));
   }
 
+  async getOrCreateStream(channel, settings) {
+    let stream = this.streams.get(channel.id);
+    if (!stream) {
+      if (this.streams.size >= settings.maxUpstreamConnections) {
+        const error = new Error(
+          "Maximum number of active streams is currently in use. Please try again later."
+        );
+        error.status = 429;
+        throw error;
+      }
+      stream = await this.createStream(channel, settings);
+      this.streams.set(channel.id, stream);
+    }
+
+    if (stream.idleTimer) {
+      clearTimeout(stream.idleTimer);
+      stream.idleTimer = null;
+    }
+
+    return stream;
+  }
+
   async createStream(channel, settings) {
     const outputDir = path.join(this.hlsRoot, channel.id);
     await fs.rm(outputDir, { recursive: true, force: true });
@@ -120,6 +152,7 @@ class StreamManager {
       status: "starting",
       playbackProfile: outputPlaybackProfile(settings),
       idleTimer: null,
+      externalTimer: null,
       stderrTail: []
     };
 
@@ -169,10 +202,25 @@ class StreamManager {
     }, settings.streamIdleTimeoutSeconds * 1000);
   }
 
+  scheduleExternalRelease(stream, viewerId) {
+    const settings = this.getSettings();
+    if (stream.externalTimer) clearTimeout(stream.externalTimer);
+
+    const timeoutMs = Math.max(settings.streamIdleTimeoutSeconds * 1000, 30000);
+    stream.externalTimer = setTimeout(() => {
+      stream.externalTimer = null;
+      this.release(viewerId);
+    }, timeoutMs);
+  }
+
   async stopStream(stream) {
     if (stream.idleTimer) {
       clearTimeout(stream.idleTimer);
       stream.idleTimer = null;
+    }
+    if (stream.externalTimer) {
+      clearTimeout(stream.externalTimer);
+      stream.externalTimer = null;
     }
 
     for (const viewerId of stream.viewerIds) {

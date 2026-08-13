@@ -21,7 +21,9 @@ const defaultSettings = {
   streamIdleTimeoutSeconds: 30,
   hlsSegmentDurationSeconds: 4,
   outputBufferSize: "3000k",
-  websitePasswordHash: process.env.WEBSITE_PASSWORD ? hashPassword(process.env.WEBSITE_PASSWORD) : ""
+  websitePasswordHash: process.env.WEBSITE_PASSWORD ? hashPassword(process.env.WEBSITE_PASSWORD) : "",
+  excludedGroups: [],
+  excludedChannels: []
 };
 
 async function ensureRuntimeDirs() {
@@ -59,7 +61,9 @@ function normalizeSettings(input = {}) {
     streamIdleTimeoutSeconds: clampInteger(merged.streamIdleTimeoutSeconds, 5, 3600, 30),
     hlsSegmentDurationSeconds: clampInteger(merged.hlsSegmentDurationSeconds, 1, 30, 4),
     outputBufferSize: String(merged.outputBufferSize || "3000k").trim(),
-    websitePasswordHash
+    websitePasswordHash,
+    excludedGroups: normalizeStringList(merged.excludedGroups),
+    excludedChannels: normalizeStringList(merged.excludedChannels)
   };
 }
 
@@ -138,6 +142,11 @@ function verifyPassword(password, passwordHash) {
 function normalizePasswordHash(value) {
   const passwordHash = String(value || "").trim();
   return /^scrypt:[a-f0-9]{32}:[a-f0-9]{128}$/i.test(passwordHash) ? passwordHash : "";
+}
+
+function normalizeStringList(value) {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(value.map((entry) => String(entry || "").trim()).filter(Boolean)));
 }
 
 function suggestedVideoBitrate(outputResolution = "720p", videoCodec = "h264") {

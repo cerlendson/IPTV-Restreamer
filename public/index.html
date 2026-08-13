@@ -109,6 +109,56 @@
           </section>
 
           <section>
+            <h2>Content Filters</h2>
+            <div class="filter-grid">
+              <div class="filter-panel">
+                <div class="filter-panel-head">
+                  <h3>Groups</h3>
+                  <button id="clearGroupFiltersButton" type="button" class="secondary mini-button">
+                    Clear
+                  </button>
+                </div>
+                <input id="filterGroupSearchInput" type="search" placeholder="Search groups" />
+                <div id="filterGroups" class="filter-list"></div>
+              </div>
+
+              <div class="filter-panel">
+                <div class="filter-panel-head">
+                  <h3>Channels</h3>
+                  <button id="clearChannelFiltersButton" type="button" class="secondary mini-button">
+                    Clear
+                  </button>
+                </div>
+                <input id="filterChannelSearchInput" type="search" placeholder="Search channels" />
+                <div id="filterChannels" class="filter-list"></div>
+              </div>
+            </div>
+          </section>
+
+          <section>
+            <h2>Third-Party Links</h2>
+            <label>
+              <span>Password</span>
+              <input
+                id="feedPasswordInput"
+                type="password"
+                autocomplete="current-password"
+                placeholder="Enter password to generate links"
+              />
+            </label>
+            <div class="form-grid">
+              <label>
+                <span>M3U playlist URL</span>
+                <input id="m3uLinkInput" type="text" readonly />
+              </label>
+              <label>
+                <span>XMLTV EPG URL</span>
+                <input id="xmltvLinkInput" type="text" readonly />
+              </label>
+            </div>
+          </section>
+
+          <section>
             <h2>Transcoding</h2>
             <div class="form-grid">
               <label>

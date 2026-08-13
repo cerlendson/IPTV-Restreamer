@@ -11,7 +11,10 @@ const state = {
   measuredBitrateKbps: null,
   search: "",
   groupSearch: "",
-  collapsedGroupCategories: new Set()
+  collapsedGroupCategories: new Set(),
+  filterOptions: { groups: [], channels: [] },
+  filterGroupSearch: "",
+  filterChannelSearch: ""
 };
 
 const VIDEO_BITRATE_SUGGESTIONS = {
@@ -38,6 +41,15 @@ const els = {
   channelTitle: document.querySelector("#channelTitle"),
   groupSearchInput: document.querySelector("#groupSearchInput"),
   searchInput: document.querySelector("#searchInput"),
+  filterGroupSearchInput: document.querySelector("#filterGroupSearchInput"),
+  filterChannelSearchInput: document.querySelector("#filterChannelSearchInput"),
+  filterGroups: document.querySelector("#filterGroups"),
+  filterChannels: document.querySelector("#filterChannels"),
+  clearGroupFiltersButton: document.querySelector("#clearGroupFiltersButton"),
+  clearChannelFiltersButton: document.querySelector("#clearChannelFiltersButton"),
+  feedPasswordInput: document.querySelector("#feedPasswordInput"),
+  m3uLinkInput: document.querySelector("#m3uLinkInput"),
+  xmltvLinkInput: document.querySelector("#xmltvLinkInput"),
   refreshButton: document.querySelector("#refreshButton"),
   adminRefreshButton: document.querySelector("#adminRefreshButton"),
   settingsForm: document.querySelector("#settingsForm"),
@@ -70,6 +82,25 @@ els.groupSearchInput.addEventListener("input", () => {
   state.groupSearch = els.groupSearchInput.value.trim().toLowerCase();
   renderGroups();
 });
+els.filterGroupSearchInput.addEventListener("input", () => {
+  state.filterGroupSearch = els.filterGroupSearchInput.value.trim().toLowerCase();
+  renderFilterGroups();
+});
+els.filterChannelSearchInput.addEventListener("input", () => {
+  state.filterChannelSearch = els.filterChannelSearchInput.value.trim().toLowerCase();
+  renderFilterChannels();
+});
+els.clearGroupFiltersButton.addEventListener("click", () => {
+  state.settings.excludedGroups = [];
+  els.settingsMessage.textContent = "Save settings to apply content filters.";
+  renderFilterGroups();
+});
+els.clearChannelFiltersButton.addEventListener("click", () => {
+  state.settings.excludedChannels = [];
+  els.settingsMessage.textContent = "Save settings to apply content filters.";
+  renderFilterChannels();
+});
+els.feedPasswordInput.addEventListener("input", renderFeedLinks);
 els.settingsForm.addEventListener("submit", saveSettings);
 els.settingsForm.elements.outputResolution.addEventListener("change", applySuggestedVideoBitrate);
 els.settingsForm.elements.videoCodec.addEventListener("change", applySuggestedVideoBitrate);
@@ -125,12 +156,19 @@ function unlockApp() {
 async function boot() {
   await Promise.all([loadSettings(), loadStatus()]);
   await loadGroups();
+  await loadFilterOptions();
   if (state.statusTimer) clearInterval(state.statusTimer);
   state.statusTimer = setInterval(() => loadStatus().catch(() => {}), 10000);
 }
 
 async function loadSettings() {
   state.settings = await api("/api/settings");
+  state.settings.excludedGroups = Array.isArray(state.settings.excludedGroups)
+    ? state.settings.excludedGroups
+    : [];
+  state.settings.excludedChannels = Array.isArray(state.settings.excludedChannels)
+    ? state.settings.excludedChannels
+    : [];
   for (const [key, value] of Object.entries(state.settings)) {
     const input = els.settingsForm.elements[key];
     if (!input) continue;
@@ -156,7 +194,9 @@ async function saveSettings(event) {
     streamIdleTimeoutSeconds: Number(form.get("streamIdleTimeoutSeconds")),
     hlsSegmentDurationSeconds: Number(form.get("hlsSegmentDurationSeconds")),
     outputBufferSize: form.get("outputBufferSize"),
-    websitePassword: form.get("websitePassword")
+    websitePassword: form.get("websitePassword"),
+    excludedGroups: state.settings.excludedGroups,
+    excludedChannels: state.settings.excludedChannels
   };
 
   const result = await api("/api/settings", {
@@ -164,7 +204,17 @@ async function saveSettings(event) {
     body: JSON.stringify(payload)
   });
   state.settings = result.settings || result;
+  state.settings.excludedGroups = Array.isArray(state.settings.excludedGroups)
+    ? state.settings.excludedGroups
+    : [];
+  state.settings.excludedChannels = Array.isArray(state.settings.excludedChannels)
+    ? state.settings.excludedChannels
+    : [];
   els.settingsForm.elements.websitePassword.value = "";
+  renderFeedLinks();
+  renderFilterOptions();
+  await loadGroups();
+  await loadStatus();
 
   if (result.streamsRestarted) {
     clearViewerSession();
@@ -202,11 +252,17 @@ async function loadChannels() {
   renderChannels();
 }
 
+async function loadFilterOptions() {
+  state.filterOptions = await api("/api/filter-options");
+  renderFilterOptions();
+}
+
 async function refreshCatalog() {
   showToast("Refreshing IPTV data...");
   const result = await api("/api/refresh", { method: "POST" });
   showToast(result.importState.message || "Refresh complete.");
   await loadGroups();
+  await loadFilterOptions();
   await loadStatus();
 }
 
@@ -330,6 +386,98 @@ function renderChannels() {
 
     els.channels.append(button);
   }
+}
+
+function renderFilterOptions() {
+  renderFilterGroups();
+  renderFilterChannels();
+}
+
+function renderFilterGroups() {
+  const excludedGroups = new Set(state.settings?.excludedGroups || []);
+  const groups = state.filterOptions.groups.filter((group) =>
+    group.toLowerCase().includes(state.filterGroupSearch)
+  );
+
+  els.filterGroups.innerHTML = "";
+  if (!groups.length) {
+    els.filterGroups.innerHTML = `<p class="message">No groups found.</p>`;
+    return;
+  }
+
+  for (const group of groups) {
+    const label = document.createElement("label");
+    label.className = "filter-option";
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = excludedGroups.has(group);
+    checkbox.addEventListener("change", () => {
+      updateExcludedList("excludedGroups", group, checkbox.checked);
+    });
+
+    const name = document.createElement("span");
+    name.textContent = group;
+
+    label.append(checkbox, name);
+    els.filterGroups.append(label);
+  }
+}
+
+function renderFilterChannels() {
+  const excludedChannels = new Set(state.settings?.excludedChannels || []);
+  const channels = state.filterOptions.channels.filter((channel) =>
+    `${channel.name} ${channel.group}`.toLowerCase().includes(state.filterChannelSearch)
+  );
+
+  els.filterChannels.innerHTML = "";
+  if (!channels.length) {
+    els.filterChannels.innerHTML = `<p class="message">No channels found.</p>`;
+    return;
+  }
+
+  for (const channel of channels) {
+    const label = document.createElement("label");
+    label.className = "filter-option channel-filter-option";
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = excludedChannels.has(channel.id);
+    checkbox.addEventListener("change", () => {
+      updateExcludedList("excludedChannels", channel.id, checkbox.checked);
+    });
+
+    const text = document.createElement("span");
+    const name = document.createElement("strong");
+    const group = document.createElement("small");
+    name.textContent = channel.name;
+    group.textContent = channel.group || "Ungrouped";
+    text.append(name, group);
+
+    label.append(checkbox, text);
+    els.filterChannels.append(label);
+  }
+}
+
+function updateExcludedList(key, value, excluded) {
+  const entries = new Set(state.settings?.[key] || []);
+  if (excluded) entries.add(value);
+  else entries.delete(value);
+  state.settings[key] = Array.from(entries);
+  els.settingsMessage.textContent = "Save settings to apply content filters.";
+}
+
+function renderFeedLinks() {
+  const password = els.feedPasswordInput.value;
+  if (!password) {
+    els.m3uLinkInput.value = "";
+    els.xmltvLinkInput.value = "";
+    return;
+  }
+
+  const encodedPassword = encodeURIComponent(password);
+  els.m3uLinkInput.value = `${window.location.origin}/playlist.m3u?password=${encodedPassword}`;
+  els.xmltvLinkInput.value = `${window.location.origin}/xmltv.xml?password=${encodedPassword}`;
 }
 
 async function playChannel(channel) {
